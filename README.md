@@ -35,6 +35,11 @@ the standard I/O of the injector binary. I.e, data written to the stdin of the
 injector is available from the `in` fd and anything written to `out` or `err`
 will end up on the stdout/stderr of the injector.
 
+The `payload_main` function is invoked on a new thread in the target process -
+if you need to interact with any UI the first thing you'll want to do is
+schedule code on the main run loop. Anything overriden with mach_override can
+be done on the new thread as mach_override is atomic.
+
 The injector will run as long as the `out` and `err` files are kept open.
 
 Implementation
@@ -43,8 +48,9 @@ Implementation
 injector is built on Jonathan Rentzsch's mach_inject, which does the heavy
 lifting of actually injecting code into other processes. Every time the
 injector is used, it generates a session UUID. A piece of bootstrap code
-is injected into the target and has the session UUID passed to it when
-invoked as a new thread.
+is injected into the target and has the session UUID passed to it. This
+bootstrap code runs as a new thread and so does not block the target's
+execution.
 
 The bootstrap code does the following:
 
