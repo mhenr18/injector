@@ -55,14 +55,14 @@ execution.
 
 The bootstrap code does the following:
 
-    - Allocate thread-local storage.
-    - Create a new pthread that we can use to continue bootstrapping.
-    - Suspends the initial thread and starts the pthread.
-    - Creates three named fifos in the temporary directory of the process.
-      The fifos have the session UUID in their names.
-    - Loads the payload .dylib from the same directory (named using the
-      session UUID).
-    - Invokes the payload's payload_main function.
+- Allocates thread-local storage.
+- Creates a new pthread that we can use to continue bootstrapping.
+- Suspends the initial thread and starts the pthread.
+- Creates three named fifos in the temporary directory of the process.
+  The fifos have the session UUID in their names.
+- Loads the payload .dylib from the same directory (named using the
+  session UUID).
+- Invokes the payload's payload_main function.
 
  By using a session UUID, it's possible for the injector binary to watch the
  file system event stream and get notified when the payload has created the
