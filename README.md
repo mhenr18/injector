@@ -23,7 +23,8 @@ Invocation is as follows:
 
 where <pid> is the PID of the process you're targeting and <dylibPath>
 is a path to a .dylib file containing your payload. The .dylib may be
-universal.
+universal (but must at least contain code with the same architecture
+as the target).
 
 Your payload .dylib *must* contain a `payload_main` function, whose signature
 is as follows:
