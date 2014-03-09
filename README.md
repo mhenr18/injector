@@ -29,7 +29,7 @@ as the target).
 Your payload .dylib *must* contain a `payload_main` function, whose signature
 is as follows:
 
-    void payload_main(int in, int out, int err, int argc, char **args);
+    void payload_main(int in, int out, int err);
 
 `in`, `out` and `err` are fds that correspond to the stdin, stdout and
 stderr of the injector. If the injector is closed and a write is made to `out`
