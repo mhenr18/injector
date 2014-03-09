@@ -1,16 +1,22 @@
 //
-// payload.c
+// payload.m
 // Copyright (c) 2014 Matthew Henry.
 // MIT licensed - refer to LICENSE.txt for details.
 //
 // The code contained in this file is compiled to run in one binary, but
 // executes as a payload in a target binary. To avoid standard library/runtime
-// conflicts, we don't use C++ or ObjC here.
+// conflicts, we don't use C++ or (much) ObjC here. For the ObjC we do use, we
+// have to explicitly send messages as objc_msgSend needs relocation!
 //
+// TODO: Test to see if our use of ObjC makes it impossible to inject into
+// binaries that don't link against Foundation.framework
+//
+
+#import <Foundation/Foundation.h>
+#import <objc/message.h>
 
 #include <dlfcn.h>
 #include <fcntl.h>
-#include <glob.h>
 #include <mach/mach_init.h>
 #include <mach/thread_act.h>
 #include <pthread.h>
@@ -42,9 +48,9 @@ void* payloadThreadEntry(void* param)
     char *base, *expanded;
     int inFIFO, outFIFO, errFIFO;
     struct ThreadParams* params = (struct ThreadParams*)param;
-    glob_t globbuf;
     void (*dylib_entry)(int, int, int);
-    void* dylib_handle;
+    void *dylib_handle;
+    NSString *tempDirPath;
     
     // we still need to relocate here (fortunately our dylib doesn't have to!)
     RELOCATE(params->codeOffset, void*, dlopen, const char *, int);
@@ -54,22 +60,27 @@ void* payloadThreadEntry(void* param)
         const char *restrict, ...);
     RELOCATE(params->codeOffset, int, open, const char *, int, ...);
     RELOCATE(params->codeOffset, void, perror, const char *);
-    RELOCATE(params->codeOffset, void, glob, const char *restrict, int,
-        int (*)(const char *, int), glob_t *restrict);
     RELOCATE(params->codeOffset, void *, memset, void *, int, size_t);
     RELOCATE(params->codeOffset, int, mkfifo, const char *, mode_t);
-    
-    // TODO: use a temp folder instead of polluting a home folder
-    base = "~/";
-    glob_impl(base, GLOB_TILDE, NULL, &globbuf);
-    expanded = globbuf.gl_pathv[0];
+    RELOCATE(params->codeOffset, NSString *, NSTemporaryDirectory, void);
+    RELOCATE(params->codeOffset, id, objc_msgSend, id, SEL, ...);
+
+    tempDirPath = NSTemporaryDirectory_impl();
+    if (!tempDirPath) {
+        perror_impl("can't get temp dir path\n");
+        return NULL;
+    }
+
+    // obscene hackery to call UTF8String on our path, as the compiler
+    // will generate objc_msgSend calls that won't be relocated
+    expanded = (char *)objc_msgSend_impl(tempDirPath, @selector(UTF8String));
     
     // In literally any other case I'd convert this into a function call.
     // But, relocating everything sucks hard + there's a gazillion params used.
     
     // in fifo
     memset_impl(inPath, 0, BUFSIZE);
-    sprintf_impl(inPath, "%s" PAYLOAD_IN_FIFO_FMT, expanded,
+    sprintf_impl(inPath, "%s/" PAYLOAD_IN_FIFO_FMT, expanded,
         params->sessionUUID);
         
     if (mkfifo_impl(inPath, 0777)) {
@@ -79,7 +90,7 @@ void* payloadThreadEntry(void* param)
     
     // out fifo
     memset_impl(outPath, 0, BUFSIZE);
-    sprintf_impl(outPath, "%s" PAYLOAD_OUT_FIFO_FMT, expanded,
+    sprintf_impl(outPath, "%s/" PAYLOAD_OUT_FIFO_FMT, expanded,
         params->sessionUUID);
         
     if (mkfifo_impl(outPath, 0777)) {
@@ -89,7 +100,7 @@ void* payloadThreadEntry(void* param)
     
     // err fifo
     memset_impl(errPath, 0, BUFSIZE);
-    sprintf_impl(errPath, "%s" PAYLOAD_ERR_FIFO_FMT, expanded,
+    sprintf_impl(errPath, "%s/" PAYLOAD_ERR_FIFO_FMT, expanded,
         params->sessionUUID);
         
     if (mkfifo_impl(errPath, 0777)) {
@@ -116,7 +127,7 @@ void* payloadThreadEntry(void* param)
 
     // Now we can load our payload and run it
     memset_impl(libPath, 0, BUFSIZE);
-    sprintf_impl(libPath, "%s" PAYLOAD_LIB_FMT, expanded,
+    sprintf_impl(libPath, "%s/" PAYLOAD_LIB_FMT, expanded,
         params->sessionUUID);
 
     dylib_handle = dlopen_impl(libPath, RTLD_NOW);

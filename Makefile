@@ -1,8 +1,8 @@
 CC = clang
-CFLAGS = 
+CFLAGS = -g
 LDFLAGS = -framework AppKit -framework CoreFoundation -framework CoreServices -framework Foundation
 
-SRCS = mach_inject.c main.m payload.c
+SRCS = mach_inject.c main.m payload.m
 
 all: injector32 injector64
 
@@ -14,3 +14,4 @@ injector64: $(SRCS)
 
 clean:
 	rm -f injector32 injector64
+	rm -rf injector32.dSYM injector64.dSYM

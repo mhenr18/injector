@@ -5,7 +5,7 @@ injector provides a way to inject arbitrary .dylibs into a running process.
 Additionally, it provides the injected code with access to the standard I/O
 associated with the injector, even if the target process is sandboxed.
 
-injector is known to work on OSX 10.9.2.
+injector is known to work on OSX 10.9.1+.
 
 Usage
 -----
@@ -19,7 +19,7 @@ being targeted.
 
 Invocation is as follows:
 
-    injector[32/64] <pid> <dylibPath> [payloadArgs...]
+    injector[32/64] <pid> <dylibPath>
 
 where `<pid>` is the PID of the process you're targeting and `<dylibPath>`
 is a path to a .dylib file containing your payload. The .dylib may be
@@ -29,10 +29,11 @@ as the target).
 Your payload .dylib *must* contain a `payload_main` function, whose signature
 is as follows:
 
-    void payload_main(int in, int out, int err);
+    void payload_main(int in, int out, int err, int argc, char **args);
 
 `in`, `out` and `err` are fds that correspond to the stdin, stdout and
-stderr of the injector.
+stderr of the injector. If the injector is closed and a write is made to `out`
+or `err`, a SIGPIPE will be raised.
 
 The `payload_main` function is invoked on a new thread in the target process -
 if you need to interact with any UI the first thing you'll want to do is
@@ -66,7 +67,7 @@ The bootstrap code does the following:
 By using a session UUID, it's possible for the injector binary to watch the
 file system event stream and get notified when the payload has created the
 fifos. This isn't for locking/sync reasons - it's actually to allow us to
-find a safe place to copy the payload to. 
+find a safe place to copy the payload to.
 
 We can't use a predetermined location and just pass that through with the 
 bootstrap injection code, because that location might not be within the
