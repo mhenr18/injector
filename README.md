@@ -32,9 +32,9 @@ is as follows:
     void payload_main(int in, int out, int err);
 
 The `in`, `out` and `err` parameters are file descriptors that correspond to
-the standard I/O of the injector binary. I.e, data written to the stdin of the
+the standard I/O of the injector binary (i.e, data written to the stdin of the
 injector is available from the `in` fd and anything written to `out` or `err`
-will end up on the stdout/stderr of the injector.
+will end up on the stdout/stderr of the injector).
 
 The `payload_main` function is invoked on a new thread in the target process -
 if you need to interact with any UI the first thing you'll want to do is
