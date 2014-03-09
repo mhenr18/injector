@@ -24,7 +24,7 @@
 #endif
 
 // CFFileDescriptor callback for forwarding data written to f out to a
-// unix file descriptor (which is passed as the info pointer)
+// unix file descriptor (which is passed as a CFNumber via the info pointer)
 void forwardingCallback(CFFileDescriptorRef f, CFOptionFlags callBackTypes,
     void *info)
 {
@@ -118,6 +118,12 @@ void setupFIFOs(NSString *inPath, NSString *outPath, NSString *errPath)
     addForwardingDescriptor(errFIFO, STDERR_FILENO);
 }
 
+// used for fsEventCallback
+struct CallbackInfo {
+    const char *sessionUUID;
+    NSString *payloadPath;
+};
+
 void fsEventCallback(
     ConstFSEventStreamRef streamRef,
     void *clientCallBackInfo,
@@ -127,10 +133,13 @@ void fsEventCallback(
     const FSEventStreamEventId eventIds[])
 {
     int i;
-    NSArray *paths = (NSArray *)eventPaths;
     NSString *inPath = nil, *outPath = nil, *errPath = nil;
     NSString *inName, *outName, *errName;
-    const char *sessionUUID = [(NSString *)clientCallBackInfo UTF8String];
+    NSString *basePath;
+    NSArray *paths = (NSArray *)eventPaths;
+    struct CallbackInfo *cbinfo = (struct CallbackInfo *)clientCallBackInfo;
+    const char *sessionUUID = cbinfo->sessionUUID;
+    NSFileManager* fileManager = [NSFileManager defaultManager];
     
     inName = [NSString stringWithFormat:@PAYLOAD_IN_FIFO_FMT, sessionUUID];
     outName = [NSString stringWithFormat:@PAYLOAD_OUT_FIFO_FMT, sessionUUID];
@@ -141,6 +150,7 @@ void fsEventCallback(
         
         if ([path hasSuffix:inName]) {
             inPath = path;
+            basePath = [inPath stringByDeletingLastPathComponent];
         } else if ([path hasSuffix:outName]) {
             outPath = path;
         } else if ([path hasSuffix:errName]) {
@@ -155,7 +165,8 @@ void fsEventCallback(
                 CFRunLoopGetCurrent(),
                 kCFRunLoopDefaultMode,
             ^{
-                // safe to cast - not in the stream's callback anymore
+                NSString *copyPath;
+                NSError *err = nil;
                 FSEventStreamRef fsEventStream = (FSEventStreamRef)streamRef;
                 
                 // clean up the fs event stream
@@ -168,6 +179,23 @@ void fsEventCallback(
                 FSEventStreamInvalidate(fsEventStream);
                 FSEventStreamRelease(fsEventStream);
                 
+                // copy our payload
+                copyPath = [NSString stringWithFormat:@"%@/" @PAYLOAD_LIB_FMT,
+                    basePath, sessionUUID];
+
+                [fileManager copyItemAtPath:cbinfo->payloadPath 
+                                     toPath:copyPath 
+                                      error:&err];
+
+                if (err) {
+                    fprintf(stderr, "%s: error copying payload\n", 
+                        PRODUCT_NAME);
+                    fprintf(stderr, "%s: %s\n", PRODUCT_NAME,
+                        [[err localizedDescription] UTF8String]);
+
+                    exit(1);
+                }
+
                 // and move onto getting a payload connection set up
                 setupFIFOs(inPath, outPath, errPath);
             });
@@ -192,6 +220,7 @@ int main(int argc, char **argv)
     FSEventStreamRef fsEventStream;
     FSEventStreamContext fsContext;
     NSError *error = nil;
+    struct CallbackInfo fsCallbackInfo;
     NSArray *fsPaths = @[@"/"];
     NSString *sessionUUID = [[NSUUID UUID] UUIDString];
     NSFileManager* fileManager = [NSFileManager defaultManager];
@@ -209,22 +238,6 @@ int main(int argc, char **argv)
         fprintf(stderr, "%s: no file exists at %s\n", PRODUCT_NAME,
             [dylibPath UTF8String]);
             
-        return 1;
-    }
-    
-    // We assume that our target is sandboxed, making it unable to read from
-    // most places. We copy the dylib to /usr/lib, which is one of the
-    // "blessed" directories that sandboxed apps may read from. Because we need
-    // root privleges to inject, we'll be fine to copy there.
-    copyPath = [NSString stringWithFormat:@"/usr/lib/payload-%@", sessionUUID];
-    [fileManager copyItemAtPath:dylibPath toPath:copyPath error:&error];
-    if (error) {
-        fprintf(stderr,
-            "%s: error copying file to globally visible location (/usr/lib)\n",
-            PRODUCT_NAME);
-            
-        fprintf(stderr, "%s: %s\n", PRODUCT_NAME,
-            [[error localizedDescription] UTF8String]);
         return 1;
     }
     
@@ -269,9 +282,12 @@ int main(int argc, char **argv)
     // sandbox will permit writing to for data to leave the payload. So, we
     // have the payload create the named FIFOs within its sandbox and listen
     // for the file creation events to figure out where they are.
+
+    fsCallbackInfo.sessionUUID = [sessionUUID UTF8String];
+    fsCallbackInfo.payloadPath = dylibPath;
     
     memset(&fsContext, 0, sizeof fsContext);
-    fsContext.info = sessionUUID;
+    fsContext.info = &fsCallbackInfo;
     
     // Establish our FS listener before injecting, so we don't get a race
     // condition.
@@ -284,13 +300,10 @@ int main(int argc, char **argv)
         kCFRunLoopDefaultMode);
     FSEventStreamStart(fsEventStream);
     
-    // Set up our payload's params (which are effectively memcpy'd to our
-    // target process, so we can't just pass a struct with pointers to strings)
-    payloadParamsSize = [sessionUUID length] + [copyPath length] + 2;
+    // Set up our payload's params (just our session UUID)
+    payloadParamsSize = [sessionUUID length] + 1;
     payloadParams = calloc(1, payloadParamsSize);
     memcpy(payloadParams, [sessionUUID UTF8String], [sessionUUID length]);
-    memcpy(payloadParams + [sessionUUID length] + 1, [copyPath UTF8String],
-        [copyPath length]);
     
     // We're ready and waiting for the payload so finally inject
     if (mach_inject(payloadEntry, payloadParams,

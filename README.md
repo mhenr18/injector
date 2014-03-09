@@ -5,7 +5,7 @@ injector provides a way to inject arbitrary .dylibs into a running process.
 Additionally, it provides the injected code with access to the standard I/O
 associated with the injector, even if the target process is sandboxed.
 
-injector is known to work on OSX 10.9.1.
+injector is known to work on OSX 10.9.2.
 
 Usage
 -----
@@ -19,9 +19,9 @@ being targeted.
 
 Invocation is as follows:
 
-    injector[32/64] <pid> <dylibPath>
+    injector[32/64] <pid> <dylibPath> [payloadArgs...]
 
-where <pid> is the PID of the process you're targeting and <dylibPath>
+where `<pid>` is the PID of the process you're targeting and `<dylibPath>`
 is a path to a .dylib file containing your payload. The .dylib may be
 universal (but must at least contain code with the same architecture
 as the target).
@@ -31,10 +31,8 @@ is as follows:
 
     void payload_main(int in, int out, int err);
 
-The `in`, `out` and `err` parameters are file descriptors that correspond to
-the standard I/O of the injector binary (i.e, data written to the stdin of the
-injector is available from the `in` fd and anything written to `out` or `err`
-will end up on the stdout/stderr of the injector).
+`in`, `out` and `err` are fds that correspond to the stdin, stdout and
+stderr of the injector.
 
 The `payload_main` function is invoked on a new thread in the target process -
 if you need to interact with any UI the first thing you'll want to do is

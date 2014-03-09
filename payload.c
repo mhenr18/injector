@@ -30,7 +30,7 @@ extern void __pthread_set_self(char *);
 
 // params used for payloadThreadEntry
 struct ThreadParams {
-    char *payloadPath, *sessionUUID;
+    char *sessionUUID;
     ptrdiff_t codeOffset;
 };
 
@@ -38,7 +38,7 @@ void* payloadThreadEntry(void* param)
 {
     // TODO: don't use fixed size buffers
     #define BUFSIZE 512
-    char inPath[BUFSIZE], outPath[BUFSIZE], errPath[BUFSIZE];
+    char inPath[BUFSIZE], outPath[BUFSIZE], errPath[BUFSIZE], libPath[BUFSIZE];
     char *base, *expanded;
     int inFIFO, outFIFO, errFIFO;
     struct ThreadParams* params = (struct ThreadParams*)param;
@@ -115,7 +115,11 @@ void* payloadThreadEntry(void* param)
     }
 
     // Now we can load our payload and run it
-    dylib_handle = dlopen_impl(params->payloadPath, RTLD_NOW);
+    memset_impl(libPath, 0, BUFSIZE);
+    sprintf_impl(libPath, "%s" PAYLOAD_LIB_FMT, expanded,
+        params->sessionUUID);
+
+    dylib_handle = dlopen_impl(libPath, RTLD_NOW);
     dylib_entry = (void (*)(int, int, int))
         dlsym_impl(dylib_handle, "payload_main");
     
@@ -145,7 +149,7 @@ void payloadEntry(ptrdiff_t codeOffset, void *paramBlock,
     // process via dlopen, which would allow us to just continue bootstrap in
     // there without needing to relocate function pointers.
     
-    char *sessionUUID, *payloadPath;
+    char *sessionUUID;
     int policy;
     struct sched_param sched;
     pthread_attr_t attr;
@@ -187,13 +191,9 @@ void payloadEntry(ptrdiff_t codeOffset, void *paramBlock,
     sched.sched_priority = sched_get_priority_max_impl(policy);
     pthread_attr_setschedparam_impl(&attr, &sched);
     
-    // the paramBlock points to two contiguous null-terminated strings.
-    // the first string is our session UUID, the second is the payload's path.
     sessionUUID = (char *)paramBlock;
-    payloadPath = sessionUUID + strlen_impl(sessionUUID) + 1;
     
     params.sessionUUID = sessionUUID;
-    params.payloadPath = payloadPath;
     params.codeOffset = codeOffset;
     
     pthread_create_impl(&thread, &attr,

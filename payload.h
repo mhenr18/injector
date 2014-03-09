@@ -10,6 +10,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 
+#define PAYLOAD_LIB_FMT "payload-%s-lib"
 #define PAYLOAD_IN_FIFO_FMT "payload-%s-in"
 #define PAYLOAD_OUT_FIFO_FMT "payload-%s-out"
 #define PAYLOAD_ERR_FIFO_FMT "payload-%s-err"
