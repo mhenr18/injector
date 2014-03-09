@@ -62,19 +62,19 @@ The bootstrap code does the following:
   The fifos have the session UUID in their names.
 - Loads the payload .dylib from the same directory (named using the
   session UUID).
-- Invokes the payload's payload_main function.
+- Invokes the payload's payload_main function. 
+ 
 
+By using a session UUID, it's possible for the injector binary to watch the
+file system event stream and get notified when the payload has created the
+fifos. This isn't for locking/sync reasons - it's actually to allow us to
+find a safe place to copy the payload to. 
 
- By using a session UUID, it's possible for the injector binary to watch the
- file system event stream and get notified when the payload has created the
- fifos. This isn't for locking/sync reasons - it's actually to allow us to
- find a safe place to copy the payload to. 
+We can't use a predetermined location and just pass that through with the 
+bootstrap injection code, because that location might not be within the
+sandbox of the target process. By having the process effectively tell us 
+where it can read and write, we sidestep the sandboxing issue.
 
- We can't use a predetermined location and just pass that through with the 
- bootstrap injection code, because that location might not be within the
- sandbox of the target process. By having the process effectively tell us 
- where it can read and write, we sidestep the sandboxing issue.
-
- Once notified of the fifo locations, the injector copies the payload into
- the same directory as the fifos and sets up redirection of the standard files
- to them.
+Once notified of the fifo locations, the injector copies the payload into
+the same directory as the fifos and sets up redirection of the standard files
+to them.
