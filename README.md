@@ -1,5 +1,5 @@
-injector - README
-=================
+injector
+========
 
 injector provides a way to inject arbitrary .dylibs into a running process.
 Additionally, it provides the injected code with access to the standard I/O
