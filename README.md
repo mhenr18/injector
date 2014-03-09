@@ -64,6 +64,7 @@ The bootstrap code does the following:
   session UUID).
 - Invokes the payload's payload_main function.
 
+
  By using a session UUID, it's possible for the injector binary to watch the
  file system event stream and get notified when the payload has created the
  fifos. This isn't for locking/sync reasons - it's actually to allow us to
