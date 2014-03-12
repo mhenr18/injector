@@ -134,7 +134,7 @@ void fsEventCallback(
 {
     int i;
     NSString *inPath = nil, *outPath = nil, *errPath = nil;
-    NSString *inName, *outName, *errName;
+    NSString *inName, *outName, *errName, *sigName;
     NSString *basePath;
     NSArray *paths = (NSArray *)eventPaths;
     struct CallbackInfo *cbinfo = (struct CallbackInfo *)clientCallBackInfo;
@@ -144,18 +144,21 @@ void fsEventCallback(
     inName = [NSString stringWithFormat:@PAYLOAD_IN_FIFO_FMT, sessionUUID];
     outName = [NSString stringWithFormat:@PAYLOAD_OUT_FIFO_FMT, sessionUUID];
     errName = [NSString stringWithFormat:@PAYLOAD_ERR_FIFO_FMT, sessionUUID];
+    sigName = [NSString stringWithFormat:@PAYLOAD_SIGNAL_FMT, sessionUUID];
     
     for (i = 0; i < numEvents; ++i) {
         NSString *path = [paths objectAtIndex:i];
+
+        // TODO: handle events where we're forced to scan subdirs/other issues
         
-        if ([path hasSuffix:inName]) {
-            inPath = path;
-            basePath = [inPath stringByDeletingLastPathComponent];
-        } else if ([path hasSuffix:outName]) {
-            outPath = path;
-        } else if ([path hasSuffix:errName]) {
-            errPath = path;
+        if ([path hasSuffix:sigName]) {
+            basePath = [path stringByDeletingLastPathComponent];
+
+            inPath = [basePath stringByAppendingPathComponent:inName];
+            outPath = [basePath stringByAppendingPathComponent:outName];
+            errPath = [basePath stringByAppendingPathComponent:errName];
         }
+
         
         if (inPath && outPath && errPath) {
             // schedule a block to run later as we can't unschedule an fs event
@@ -221,7 +224,7 @@ int main(int argc, char **argv)
     FSEventStreamContext fsContext;
     NSError *error = nil;
     struct CallbackInfo fsCallbackInfo;
-    NSArray *fsPaths = @[@"/"];
+    NSArray *fsPaths = @[@"/", @"/var/folders", @"/private"];
     NSString *sessionUUID = [[NSUUID UUID] UUIDString];
     NSFileManager* fileManager = [NSFileManager defaultManager];
     
@@ -312,7 +315,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "%s: failed to inject\n", PRODUCT_NAME);
         return 1;
     }
-    
+
     // TODO: add a timeout so we don't hang forever when something breaks
     CFRunLoopRun();
     return 0;

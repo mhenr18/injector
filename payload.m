@@ -44,13 +44,15 @@ void* payloadThreadEntry(void* param)
 {
     // TODO: don't use fixed size buffers
     #define BUFSIZE 512
-    char inPath[BUFSIZE], outPath[BUFSIZE], errPath[BUFSIZE], libPath[BUFSIZE];
+    char inPath[BUFSIZE], outPath[BUFSIZE], errPath[BUFSIZE], libPath[BUFSIZE], sigPath[BUFSIZE];
     char *base, *expanded;
     int inFIFO, outFIFO, errFIFO;
+    size_t len;
     struct ThreadParams* params = (struct ThreadParams*)param;
     void (*dylib_entry)(int, int, int);
     void *dylib_handle;
     NSString *tempDirPath;
+    FILE *sigFile;
     
     // we still need to relocate here (fortunately our dylib doesn't have to!)
     RELOCATE(params->codeOffset, void*, dlopen, const char *, int);
@@ -64,6 +66,11 @@ void* payloadThreadEntry(void* param)
     RELOCATE(params->codeOffset, int, mkfifo, const char *, mode_t);
     RELOCATE(params->codeOffset, NSString *, NSTemporaryDirectory, void);
     RELOCATE(params->codeOffset, id, objc_msgSend, id, SEL, ...);
+    RELOCATE(params->codeOffset, void *, malloc, size_t);
+    RELOCATE(params->codeOffset, size_t, strlen, const char *);
+    RELOCATE(params->codeOffset, char *, strcpy, char *, const char *);
+    RELOCATE(params->codeOffset, FILE *, fopen, const char *, const char *);
+    RELOCATE(params->codeOffset, void, fclose, FILE *);
 
     tempDirPath = NSTemporaryDirectory_impl();
     if (!tempDirPath) {
@@ -73,7 +80,15 @@ void* payloadThreadEntry(void* param)
 
     // obscene hackery to call UTF8String on our path, as the compiler
     // will generate objc_msgSend calls that won't be relocated
-    expanded = (char *)objc_msgSend_impl(tempDirPath, @selector(UTF8String));
+    base = (char *)objc_msgSend_impl(tempDirPath, @selector(UTF8String));
+
+    // make sure we don't have a trailing backslash
+    len = strlen_impl(base);
+    expanded = malloc_impl(len + 1);
+    strcpy_impl(expanded, base);
+    if (expanded[len - 1] == '/') {
+        expanded[len - 1] = 0;
+    }
     
     // In literally any other case I'd convert this into a function call.
     // But, relocating everything sucks hard + there's a gazillion params used.
@@ -107,14 +122,26 @@ void* payloadThreadEntry(void* param)
         perror_impl("couldn't make err fifo\n");
         return NULL;
     }
+
+
+    // signal file to tell the injector our fifos exist (handles cases
+    // where the fifos haven't shown up in the FS event stream)
+    memset_impl(sigPath, 0, BUFSIZE);
+    sprintf_impl(sigPath, "%s/" PAYLOAD_SIGNAL_FMT, expanded,
+        params->sessionUUID);
+        
+    sigFile = fopen_impl(sigPath, "w");
+    fclose_impl(sigFile);
     
+
+
     // we open our fifos after creating them all as the injector will look for
-    // all 3 before opening up any
+    // the signal file before opening any on its end
     if ((inFIFO = open_impl(inPath, O_RDONLY)) < 0) {
         perror_impl("couldn't open in fifo\n");
         return NULL;
     }
-    
+
     if ((outFIFO = open_impl(outPath, O_WRONLY)) < 0) {
         perror_impl("couldn't open out fifo\n");
         return NULL;
@@ -131,6 +158,11 @@ void* payloadThreadEntry(void* param)
         params->sessionUUID);
 
     dylib_handle = dlopen_impl(libPath, RTLD_NOW);
+    if (!dylib_handle) {
+        printf_impl("couldn't open payload\n");
+        return NULL;
+    }
+
     dylib_entry = (void (*)(int, int, int))
         dlsym_impl(dylib_handle, "payload_main");
     
