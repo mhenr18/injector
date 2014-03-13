@@ -208,49 +208,55 @@ void fsEventCallback(
     }
 }
 
-int main(int argc, char **argv)
+// Parses the supplied command line args and writes them out to the given
+// targetPID and NSString pointers. If parsing succeeds 1 is returned,
+// otherwise 0 is returned on failure.
+int parseArgs(int argc, char **argv, pid_t *targetPID, NSString **dylibPath)
 {
-@autoreleasepool {
-    // TODO: Prove that it's safe (i.e find docs) to use NSRunningApplication
-    // without having a current NSApplication instance. (or just fire up an
-    // NSApplication)
-    
-    pid_t targetPID;
-    char *payloadParams;
-    size_t payloadParamsSize;
-    NSString *dylibPath, *copyPath;
-    NSRunningApplication *targetApp;
-    FSEventStreamRef fsEventStream;
-    FSEventStreamContext fsContext;
-    NSError *error = nil;
-    struct CallbackInfo fsCallbackInfo;
-    NSArray *fsPaths = @[@"/", @"/var/folders", @"/private"];
-    NSString *sessionUUID = [[NSUUID UUID] UUIDString];
-    NSFileManager* fileManager = [NSFileManager defaultManager];
-    
     if (argc < 3) {
         fprintf(stderr, "%1$s: usage %1$s <pid> <dylib_path>\n", PRODUCT_NAME);
-        return 1;
+        return 0;
     }
     
-    // TODO: validate pid (although mach_inject doesn't inject PID 0 so atoi's
-    // failure case is tolerable for now)
-    targetPID = atoi(argv[1]);
-    dylibPath = [NSString stringWithUTF8String:argv[2]];
-    if (![fileManager fileExistsAtPath:dylibPath]) {
+    // parse our PID and do some error checks to see if we actually tried pid
+    // 0 or if we had a junk argument
+    *targetPID = atoi(argv[1]);
+    if (*targetPID == 0) {
+        if (strcmp("0", argv[1]) == 0) {
+            fprintf(stderr, "%s: unable to inject into kernel_task (pid 0)\n",
+                PRODUCT_NAME);
+            return 0;
+        } else {
+            fprintf(stderr, "%s: invalid pid '%s'\n", PRODUCT_NAME, argv[1]);
+            return 0;
+        }
+    }
+
+
+    // make sure we've got a dylib to work with
+    *dylibPath = [NSString stringWithUTF8String:argv[2]];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:*dylibPath]) {
         fprintf(stderr, "%s: no file exists at %s\n", PRODUCT_NAME,
-            [dylibPath UTF8String]);
+            [*dylibPath UTF8String]);
             
-        return 1;
+        return 0;
     }
-    
-    targetApp = [NSRunningApplication
-        runningApplicationWithProcessIdentifier:targetPID];
+
+    return 1;
+}
+
+// Returns 1 if the process at the given PID has the same binary architecture
+// as the current one, or 0 if it doesn't or on error (i.e there's no process
+// with the given PID).
+int processHasSameArch(pid_t pid)
+{
+    NSRunningApplication *targetApp = [NSRunningApplication
+        runningApplicationWithProcessIdentifier:pid];
     if (!targetApp) {
         fprintf(stderr, "%s: no running application with pid %d\n",
-            PRODUCT_NAME, targetPID);
+            PRODUCT_NAME, pid);
             
-        return 1;
+        return 0;
     }
     
     // Ensure the target app has the right arch for the current injector
@@ -262,7 +268,7 @@ int main(int argc, char **argv)
             "%s: unable to inject into 32 bit processes - use injector32\n",
             PRODUCT_NAME);
             
-        return 1;
+        return 0;
     }
     #else
     if ([targetApp executableArchitecture] !=
@@ -272,23 +278,56 @@ int main(int argc, char **argv)
             "%s: unable to inject into 64 bit processes - use injector64\n",
             PRODUCT_NAME);
             
-        return 1;
+        return 0;
     }
     #endif
+
+    return 1;
+}
+
+int main(int argc, char **argv)
+{
+@autoreleasepool {
+    pid_t targetPID;
+    char *payloadParams;
+    size_t payloadParamsSize;
+    NSString *dylibPath, *copyPath;
+    FSEventStreamRef fsEventStream;
+    FSEventStreamContext fsContext;
+    NSError *error = nil;
+    struct CallbackInfo fsCallbackInfo;
+    NSArray *fsPaths = @[@"/", @"/var/folders", @"/private"];
+    NSString *sessionUUID = [[NSUUID UUID] UUIDString];
+    
+    if (!parseArgs(argc, argv, &targetPID, &dylibPath)) {
+        return 1;
+    }
+
+    if (!processHasSameArch(targetPID)) {
+        return 1;
+    }
     
     // App Sandbox prevents most IPC from functioning. UNIX domain sockets,
     // semaphores, etc are all out of the equation (while it's possible for
-    // domain sockets to be located in a common place, the process requires a
-    // networking entitlement).
+    // domain sockets to be located within the target's sandbox, the target 
+    // would require a networking entitlement).
     //
     // We can use named FIFOs but they have to be in a location that the
     // sandbox will permit writing to for data to leave the payload. So, we
-    // have the payload create the named FIFOs within its sandbox and listen
-    // for the file creation events to figure out where they are.
+    // have the payload create the named FIFOs within its sandbox and then
+    // create a normal file in the same location that we use as a signal to
+    // figure out where a safe common area is.
+    //
+    // By using a file system event stream, we can get notified when the
+    // signal file is created, so that we don't need to try and scan a ton
+    // of directories hunting for it.
 
     fsCallbackInfo.sessionUUID = [sessionUUID UTF8String];
     fsCallbackInfo.payloadPath = dylibPath;
     
+    // Setup our context object and params for use in the file system listener
+    // - we zero out the context struct to null out the retain/release cbs and
+    // zero out the other fields as required by the API.
     memset(&fsContext, 0, sizeof fsContext);
     fsContext.info = &fsCallbackInfo;
     
