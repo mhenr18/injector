@@ -2,16 +2,30 @@ CC = clang
 CFLAGS = -g
 LDFLAGS = -framework AppKit -framework CoreFoundation -framework CoreServices -framework Foundation
 
-SRCS = mach_inject.c main.m payload.m
+SRCS = main.m payload.m mach_inject/mach_inject/mach_inject.c
+OBJS32 = $(addprefix obj/, $(addsuffix .32.o,$(SRCS)))
+OBJS64 = $(addprefix obj/, $(addsuffix .64.o,$(SRCS)))
 
-all: injector32 injector64
+all: out/injector32 out/injector64
 
-injector32: $(SRCS)
-	$(CC) -m32 $(CFLAGS) $(LDFLAGS) $^ -o $@
+-include $(OBJS32:.32.o=.32.dep)
+-include $(OBJS64:.64.o=.64.dep)
 
-injector64: $(SRCS)
-	$(CC) -m64 $(CFLAGS) $(LDFLAGS) $^ -o $@
+obj/%.32.o: %
+	@mkdir -p $(dir $@)
+	$(CC) -MD -MF $(subst .o,.dep,$@) -c -m32 $(CFLAGS) $< -o $@
+
+obj/%.64.o: %
+	@mkdir -p $(dir $@)
+	$(CC) -MD -MF $(subst .o,.dep,$@) -c -m64 $(CFLAGS) $< -o $@
+
+out/injector32: $(OBJS32)
+	@mkdir -p $(dir $@)
+	$(CC) -m32 $(LDFLAGS) $(OBJS32) -o $@
+
+out/injector64: $(OBJS64)
+	@mkdir -p $(dir $@)
+	$(CC) -m64 $(LDFLAGS) $(OBJS64) -o $@
 
 clean:
-	rm -f injector32 injector64
-	rm -rf injector32.dSYM injector64.dSYM
+	rm -rf obj out

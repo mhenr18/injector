@@ -14,7 +14,7 @@
 
 #include <stdio.h>
 #include <stdbool.h>
-#include "mach_inject.h"
+#include "mach_inject/mach_inject/mach_inject.h"
 #include "payload.h"
 
 #ifdef __x86_64__
