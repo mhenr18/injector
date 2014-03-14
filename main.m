@@ -122,6 +122,7 @@ void setupFIFOs(NSString *inPath, NSString *outPath, NSString *errPath)
 struct CallbackInfo {
     const char *sessionUUID;
     NSString *payloadPath;
+    int signalRecieved;
 };
 
 void fsEventCallback(
@@ -157,6 +158,7 @@ void fsEventCallback(
             inPath = [basePath stringByAppendingPathComponent:inName];
             outPath = [basePath stringByAppendingPathComponent:outName];
             errPath = [basePath stringByAppendingPathComponent:errName];
+            cbinfo->signalRecieved = 1;
         }
 
         
@@ -324,6 +326,7 @@ int main(int argc, char **argv)
 
     fsCallbackInfo.sessionUUID = [sessionUUID UTF8String];
     fsCallbackInfo.payloadPath = dylibPath;
+    fsCallbackInfo.signalRecieved = 0;
     
     // Setup our context object and params for use in the file system listener
     // - we zero out the context struct to null out the retain/release cbs and
@@ -355,8 +358,20 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    // TODO: add a timeout so we don't hang forever when something breaks
-    CFRunLoopRun();
+    // Now wait for our signal file
+    SInt32 res = CFRunLoopRunInMode(kCFRunLoopDefaultMode, 10, false);
+
+    if (!fsCallbackInfo.signalRecieved) {
+        // timed out and didn't find the file
+        fprintf(stderr, "%s: failed to establish communications (timed out)",
+            PRODUCT_NAME);
+
+        // TODO: add a check to see if our target process terminated
+    } else {
+        // found the file, we're good to run indefinitely now
+        CFRunLoopRun();
+    }
+
     return 0;
     
 } // end @autoreleasepool
