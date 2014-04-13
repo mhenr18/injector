@@ -12,8 +12,10 @@
 #import <CoreServices/CoreServices.h>
 #import <Foundation/Foundation.h>
 
+#include <pthread.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <sys/sysctl.h>
 #include "mach_inject/mach_inject/mach_inject.h"
 #include "payload.h"
 
@@ -23,35 +25,42 @@
 #define PRODUCT_NAME "injector32"
 #endif
 
-// CFFileDescriptor callback for forwarding data written to f out to a
-// unix file descriptor (which is passed as a CFNumber via the info pointer)
-void forwardingCallback(CFFileDescriptorRef f, CFOptionFlags callBackTypes,
-    void *info)
+// Threads used for reading on files (note that due to the use of named fifos,
+// we won't pick up EOF/close if the payload closes out or err - there must be
+// an active read() call to pick it up).
+//
+// We detach the in thread as it doesn't matter to our execution.
+pthread_t inThread, outThread, errThread;
+
+struct readerThreadParams {
+    int src, dst;
+};
+
+void * readerThreadEntry(void *param)
 {
-    int src = CFFileDescriptorGetNativeDescriptor(f);
-    int dest;
+    struct readerThreadParams *params = param;
+    int src = params->src;
+    int dst = params->dst;
     ssize_t len;
     char buf[128];
-    
-    CFNumberGetValue((CFNumberRef)info, kCFNumberIntType, &dest);
-    
+
     // TODO: error-check syscalls
     for (;;) {
-        len = read(src, buf, 128);
+        len = read(src, buf, sizeof(buf));
         
         if (len > 0) {
-            write(dest, buf, len);
-            
-            if (len != 128) {
-                break;
-            }
+            write(dst, buf, len);
+        } else if (len == 0) {
+            close(src);
+            close(dst);
+            return NULL;
         } else {
+            printf("error\n");
             break;
         }
     }
-    
-    // callbacks are one-shot so we have to keep asking for them
-    CFFileDescriptorEnableCallBacks(f, kCFFileDescriptorReadCallBack);
+
+    return NULL;
 }
 
 // helpers for use with CF context structs
@@ -65,24 +74,13 @@ void release(void *info)
     CFRelease((CFTypeRef)info);
 }
 
-// Adds a CFFileDescriptor to the main run loop to forward data from the
-// `from` file descriptor to the `to` file descriptor.
-void addForwardingDescriptor(int from, int to)
+void createReaderThread(pthread_t *thread, int from, int to)
 {
-    CFFileDescriptorRef fdRef;
-    CFRunLoopSourceRef rlSrc;
-    CFFileDescriptorContext context;
-    memset(&context, 0, sizeof context);
-    context.retain = retain;
-    context.release = release;
-    context.info = (void *)CFNumberCreate(kCFAllocatorDefault,
-        kCFNumberIntType, &to);
-    
-    fdRef = CFFileDescriptorCreate(kCFAllocatorDefault, from, true,
-        forwardingCallback, &context);
-    CFFileDescriptorEnableCallBacks(fdRef, kCFFileDescriptorReadCallBack);
-    rlSrc = CFFileDescriptorCreateRunLoopSource(kCFAllocatorDefault, fdRef, 0);
-    CFRunLoopAddSource(CFRunLoopGetMain(), rlSrc, kCFRunLoopDefaultMode);
+    struct readerThreadParams *params = malloc(sizeof *params);
+    params->src = from;
+    params->dst = to;
+
+    pthread_create(thread, NULL, readerThreadEntry, params);
 }
 
 // Adds CFFileDescriptors to the main run loop to handle forwarding data from:
@@ -112,10 +110,11 @@ void setupFIFOs(NSString *inPath, NSString *outPath, NSString *errPath)
         return;
     }
     
-    // and setup our forwarding descriptors
-    addForwardingDescriptor(STDIN_FILENO, inFIFO);
-    addForwardingDescriptor(outFIFO, STDOUT_FILENO);
-    addForwardingDescriptor(errFIFO, STDERR_FILENO);
+    // and setup our forwarding threads
+    // TODO: refactor to use kqueue
+    createReaderThread(&inThread, STDIN_FILENO, inFIFO);
+    createReaderThread(&outThread, outFIFO, STDOUT_FILENO);
+    createReaderThread(&errThread, errFIFO, STDERR_FILENO);
 }
 
 // used for fsEventCallback
@@ -203,6 +202,9 @@ void fsEventCallback(
 
                 // and move onto getting a payload connection set up
                 setupFIFOs(inPath, outPath, errPath);
+
+                // finally, we break out of our run loop
+                CFRunLoopStop(CFRunLoopGetCurrent()); 
             });
             
             break;
@@ -252,20 +254,16 @@ int parseArgs(int argc, char **argv, pid_t *targetPID, NSString **dylibPath)
 // with the given PID).
 int processHasSameArch(pid_t pid)
 {
-    NSRunningApplication *targetApp = [NSRunningApplication
-        runningApplicationWithProcessIdentifier:pid];
-    if (!targetApp) {
-        fprintf(stderr, "%s: no running application with pid %d\n",
-            PRODUCT_NAME, pid);
-            
+    cpu_type_t cpuType;
+    size_t cpuTypeSize;
+
+    if (sysctlbyname("sysctl.proc_cputype", &cpuType, &cpuTypeSize, 0, 0)) {
+        fprintf(stderr, "%s: no process with PID %d\n", PRODUCT_NAME, pid);
         return 0;
     }
-    
-    // Ensure the target app has the right arch for the current injector
+
     #ifdef __x86_64__
-    if ([targetApp executableArchitecture] !=
-        NSBundleExecutableArchitectureX86_64)
-    {
+    if (cpuType != CPU_TYPE_X86_64) {
         fprintf(stderr,
             "%s: unable to inject into 32 bit processes - use injector32\n",
             PRODUCT_NAME);
@@ -273,9 +271,7 @@ int processHasSameArch(pid_t pid)
         return 0;
     }
     #else
-    if ([targetApp executableArchitecture] !=
-        NSBundleExecutableArchitectureI386)
-    {
+    if (cpuType != CPU_TYPE_X86) {
         fprintf(stderr,
             "%s: unable to inject into 64 bit processes - use injector64\n",
             PRODUCT_NAME);
@@ -358,20 +354,30 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    // Now wait for our signal file
+    // Now wait for our signal file - we leave the run loop to keep
+    // going until we stop it ourselves
     SInt32 res = CFRunLoopRunInMode(kCFRunLoopDefaultMode, 10, false);
 
     if (!fsCallbackInfo.signalRecieved) {
         // timed out and didn't find the file
-        fprintf(stderr, "%s: failed to establish communications (timed out)",
+        fprintf(stderr, "%s: failed to establish communications (timed out)\n",
             PRODUCT_NAME);
 
         // TODO: add a check to see if our target process terminated
-    } else {
-        // found the file, we're good to run indefinitely now
-        CFRunLoopRun();
+
+        return 1;
     }
 
+    // At this point, our reader threads have been started.
+
+    // Detach from the in thread as it'll just do its own thing
+    pthread_detach(inThread);
+
+    // And join the out and err ones so we can exit when they close
+    pthread_join(outThread, NULL);
+    pthread_join(errThread, NULL);
+
+    printf("injector terminating\n");
     return 0;
     
 } // end @autoreleasepool

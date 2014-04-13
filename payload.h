@@ -17,6 +17,6 @@
 #define PAYLOAD_SIGNAL_FMT "payload-%s-signal"
 
 void payloadEntry(ptrdiff_t codeOffset, void *paramBlock,
-    unsigned int paramSize, void* dummy_pthread_data);
+    size_t paramSize, void* dummy_pthread_data);
 
 #endif

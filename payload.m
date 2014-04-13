@@ -44,7 +44,7 @@ void* payloadThreadEntry(void* param)
 {
     // TODO: don't use fixed size buffers
     #define BUFSIZE 512
-    char inPath[BUFSIZE], outPath[BUFSIZE], errPath[BUFSIZE], libPath[BUFSIZE], sigPath[BUFSIZE];
+    char confbuf[BUFSIZE], inPath[BUFSIZE], outPath[BUFSIZE], errPath[BUFSIZE], libPath[BUFSIZE], sigPath[BUFSIZE];
     char *base, *expanded;
     int inFIFO, outFIFO, errFIFO;
     size_t len;
@@ -71,16 +71,27 @@ void* payloadThreadEntry(void* param)
     RELOCATE(params->codeOffset, char *, strcpy, char *, const char *);
     RELOCATE(params->codeOffset, FILE *, fopen, const char *, const char *);
     RELOCATE(params->codeOffset, void, fclose, FILE *);
+    RELOCATE(params->codeOffset, size_t, confstr, int, char *, size_t);
 
-    tempDirPath = NSTemporaryDirectory_impl();
-    if (!tempDirPath) {
-        perror_impl("can't get temp dir path\n");
-        return NULL;
+    if (dlsym_impl(RTLD_DEFAULT, "NSTemporaryDirectory") != NULL) {
+        tempDirPath = NSTemporaryDirectory_impl();
+        if (!tempDirPath) {
+            perror_impl("can't get temp dir path");
+            return NULL;
+        }
+
+        // obscene hackery to call UTF8String on our path, as the compiler
+        // will generate objc_msgSend calls that won't be relocated
+        base = (char *)objc_msgSend_impl(tempDirPath, @selector(UTF8String));
+    } else {
+        if (!confstr_impl(_CS_DARWIN_USER_TEMP_DIR, confbuf, BUFSIZE)) {
+            base = "/tmp";
+        } else {
+            base = confbuf;
+        }
     }
 
-    // obscene hackery to call UTF8String on our path, as the compiler
-    // will generate objc_msgSend calls that won't be relocated
-    base = (char *)objc_msgSend_impl(tempDirPath, @selector(UTF8String));
+    printf_impl("%s\n", base);
 
     // make sure we don't have a trailing backslash
     len = strlen_impl(base);
@@ -99,7 +110,7 @@ void* payloadThreadEntry(void* param)
         params->sessionUUID);
         
     if (mkfifo_impl(inPath, 0777)) {
-        perror_impl("couldn't make in fifo\n");
+        perror_impl("couldn't make in fifo");
         return NULL;
     }
     
@@ -176,7 +187,7 @@ void* payloadThreadEntry(void* param)
 }
 
 void payloadEntry(ptrdiff_t codeOffset, void *paramBlock,
-    unsigned int paramSize, void* dummy_pthread_data)
+    size_t paramSize, void* dummy_pthread_data)
 {
     // In this function, we're in the rawest of raw states. We have no
     // thread-local storage, our function addresses are wrong, we're not

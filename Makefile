@@ -6,7 +6,15 @@ SRCS = main.m payload.m mach_inject/mach_inject/mach_inject.c
 OBJS32 = $(addprefix obj/, $(addsuffix .32.o,$(SRCS)))
 OBJS64 = $(addprefix obj/, $(addsuffix .64.o,$(SRCS)))
 
-all: out/injector32 out/injector64
+all: out/all_tests_passed
+
+no-tests: out/injector32 out/injector64
+
+out/all_tests_passed: out/injector32 out/injector64
+	@cd tests && ./harness.sh ../out/testresults.txt ../out/all_tests_passed
+
+tests: out/injector32 out/injector64
+	@cd tests && ./harness.sh ../out/testresults.txt ../out/all_tests_passed
 
 -include $(OBJS32:.32.o=.32.dep)
 -include $(OBJS64:.64.o=.64.dep)
@@ -29,3 +37,4 @@ out/injector64: $(OBJS64)
 
 clean:
 	rm -rf obj out
+	@cd tests && ./clean.sh
