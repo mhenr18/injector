@@ -175,7 +175,7 @@ void* payloadThreadEntry(void* param)
     }
 
     dylib_entry = (void (*)(int, int, int))
-        dlsym_impl(dylib_handle, "payload_main");
+        dlsym_impl(dylib_handle, "payload_entry");
     
     if (!dylib_entry) {
         printf_impl("no entry point\n");

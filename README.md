@@ -31,10 +31,10 @@ Aside from submodules, injector has no other dependencies.
 Building
 --------
 
-Building is done using the Makefile. Note that there's no installation step,
-so the entire build process is performed with a single `make` invocation.
-This will build injectors for both i386 and x86_64 and leave them in the `out`
-directory.
+Building is done using Make, with no configuration step. Note that there's no
+installation step, so the entire build process is performed with a single 
+`make` invocation. This will build injectors for both i386 and x86_64 and leave
+them in the `out` directory.
 
 It will also run some test scripts. Unfortunately, because injector requires
 elevated permissions to function, these scripts are currently forced to use
@@ -55,7 +55,7 @@ being targeted.
 
 Invocation is as follows (likely with a `sudo` preceding):
 
-    injector[32/64] <pid> <dylibPath>
+    injector[32|64] <pid> <dylibPath>
 
 where `<pid>` is the PID of the process you're targeting and `<dylibPath>`
 is a path to a .dylib file containing your payload. The .dylib may be
