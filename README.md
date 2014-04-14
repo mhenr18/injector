@@ -7,17 +7,53 @@ associated with the injector, even if the target process is sandboxed.
 
 injector is known to work on OSX 10.9.1+.
 
+Cloning
+-------
+
+injector uses git submodules to reference the underlying mach_inject library.
+Because of this, you'll need to make sure you clone these as well when cloning
+this repository.
+
+With newer versions of git, you can do this by just passing the `--recursive`
+flag to `git clone`. For example,
+
+    git clone --recursive https://github.com/mhenr18/injector.git
+
+will clone the repository + the submodule. Older versions of git can accomplish
+the same task by using:
+
+    git clone https://github.com/mhenr18/injector.git
+	cd injector
+	git submodule update --init --recursive
+
+Aside from submodules, injector has no other dependencies.
+
+Building
+--------
+
+Building is done using the Makefile. Note that there's no installation step,
+so the entire build process is performed with a single `make` invocation.
+This will build injectors for both i386 and x86_64 and leave them in the `out`
+directory.
+
+It will also run some test scripts. Unfortunately, because injector requires
+elevated permissions to function, these scripts are currently forced to use
+sudo to run the injector binaries. This means that you'll be prompted for your
+password during these tests.
+
+If you don't want to run these tests, you can use `make no-tests` to build.
+
 Usage
 -----
 
 Because injector uses task_for_pid(), it will need to be run with root
 privledges (i.e using sudo).
 
-There are two injector binaries - one for IA-32 and one for x86-64.
+There are two injector binaries - one for i386 and one for x86_64.
 You need to use the binary that matches the architecture of the process
 being targeted.
 
-Invocation is as follows:
+Invocation is as follows (likely with a `sudo` preceding):
 
     injector[32/64] <pid> <dylibPath>
 
@@ -26,19 +62,15 @@ is a path to a .dylib file containing your payload. The .dylib may be
 universal (but must at least contain code with the same architecture
 as the target).
 
-Your payload .dylib *must* contain a `payload_main` function, whose signature
+Your payload .dylib *must* contain a `payload_entry` function, whose signature
 is as follows:
 
-    void payload_main(int in, int out, int err);
+    void payload_entry(int in, int out, int err);
 
-`in`, `out` and `err` are fds that correspond to the stdin, stdout and
-stderr of the injector. If the injector is closed and a write is made to `out`
-or `err`, a SIGPIPE will be raised.
-
-The `payload_main` function is invoked on a new thread in the target process -
-if you need to interact with any UI the first thing you'll want to do is
-schedule code on the main run loop. Anything overriden with mach_override can
-be done on the new thread as mach_override is atomic.
+This function is called on a new thread upon injection. `in`, `out` and `err`
+are fds that correspond to the stdin, stdout and stderr of the injector. Note
+that managing them is the role of the payload - they aren't closed if needed
+when the entry point returns.
 
 The injector will run as long as the `out` and `err` files are kept open.
 
@@ -56,18 +88,16 @@ The bootstrap code does the following:
 
 - Allocates thread-local storage.
 - Creates a new pthread that we can use to continue bootstrapping.
-- Suspends the initial thread and starts the pthread.
+- Suspends the bootstrap thread and starts the pthread.
 - Creates three named fifos in the temporary directory of the process.
-  The fifos have the session UUID in their names.
+  (which have the session UUID in their names).
 - Loads the payload .dylib from the same directory (named using the
   session UUID).
-- Invokes the payload's payload_main function. 
- 
+- Invokes the payload's payload_entry function.
 
 By using a session UUID, it's possible for the injector binary to watch the
 file system event stream and get notified when the payload has created the
-fifos. This isn't for locking/sync reasons - it's actually to allow us to
-find a safe place to copy the payload to.
+fifos. This allows us to find a safe place to copy the payload to.
 
 We can't use a predetermined location and just pass that through with the 
 bootstrap injection code, because that location might not be within the
