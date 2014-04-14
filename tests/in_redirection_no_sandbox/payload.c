@@ -3,7 +3,7 @@
 #include <string.h>
 #include <unistd.h>
 
-void payload_main(int in, int out, int err)
+void payload_entry(int in, int out, int err)
 {
 	// we expect "Hello World!", which is 12 chars + a NUL
 	const char *expected = "Hello World!";
