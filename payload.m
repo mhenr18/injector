@@ -91,8 +91,6 @@ void* payloadThreadEntry(void* param)
         }
     }
 
-    printf_impl("%s\n", base);
-
     // make sure we don't have a trailing backslash
     len = strlen_impl(base);
     expanded = malloc_impl(len + 1);
