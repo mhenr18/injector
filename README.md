@@ -39,7 +39,9 @@ This function is called on a new thread upon injection. `in`, `out` and `err`
 are files that correspond to the stdin, stdout and stderr of the injector.
 Don't close them in your payload.
 
-The injector will run as long as the `out` and `err` files are kept open.
+The injector will run as long as the `out` and `err` files are kept open (which
+effectively means until `payload_entry` returns).
+
 
 Implementation
 --------------
