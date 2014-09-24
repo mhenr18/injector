@@ -5,43 +5,15 @@ injector provides a way to inject arbitrary .dylibs into a running process.
 Additionally, it provides the injected code with access to the standard I/O
 associated with the injector, even if the target process is sandboxed.
 
-injector is known to work on OSX 10.9.1+.
-
-Cloning
--------
-
-injector uses git submodules to reference the underlying mach_inject library.
-Because of this, you'll need to make sure you clone these as well when cloning
-this repository.
-
-With newer versions of git, you can do this by just passing the `--recursive`
-flag to `git clone`. For example,
-
-    git clone --recursive https://github.com/mhenr18/injector.git
-
-will clone the repository + the submodule. Older versions of git can accomplish
-the same task by using:
-
-    git clone https://github.com/mhenr18/injector.git
-	cd injector
-	git submodule update --init --recursive
-
-Aside from submodules, injector has no other dependencies.
+injector is known to work on OSX 10.9 and has no other dependencies.
 
 Building
 --------
 
 Building is done using Make, with no configuration step. Note that there's no
 installation step, so the entire build process is performed with a single 
-`make` invocation. This will build injectors for both i386 and x86_64 and leave
-them in the `out` directory.
-
-It will also run some test scripts. Unfortunately, because injector requires
-elevated permissions to function, these scripts are currently forced to use
-sudo to run the injector binaries. This means that you'll be prompted for your
-password during these tests.
-
-If you don't want to run these tests, you can use `make no-tests` to build.
+`make` invocation. This will build a universal injector that can inject code
+into both i386 and x86_64 binaries.
 
 Usage
 -----
@@ -49,28 +21,23 @@ Usage
 Because injector uses task_for_pid(), it will need to be run with root
 privledges (i.e using sudo).
 
-There are two injector binaries - one for i386 and one for x86_64.
-You need to use the binary that matches the architecture of the process
-being targeted.
-
 Invocation is as follows (likely with a `sudo` preceding):
 
-    injector[32|64] <pid> <dylibPath>
+    injector target_pid payload_path [payload_args...]
 
-where `<pid>` is the PID of the process you're targeting and `<dylibPath>`
-is a path to a .dylib file containing your payload. The .dylib may be
-universal (but must at least contain code with the same architecture
+where `target_pid` is the PID of the process you're targeting and 
+`payload_path` is a path to a .dylib file containing your payload. The .dylib
+may be universal (but must at least contain code with the same architecture
 as the target).
 
 Your payload .dylib *must* contain a `payload_entry` function, whose signature
 is as follows:
 
-    void payload_entry(int in, int out, int err);
+    void payload_entry(int argc, char **argv, FILE *in, FILE *out, FILE *err);
 
 This function is called on a new thread upon injection. `in`, `out` and `err`
-are fds that correspond to the stdin, stdout and stderr of the injector. Note
-that managing them is the role of the payload - they aren't closed if needed
-when the entry point returns.
+are files that correspond to the stdin, stdout and stderr of the injector.
+Don't close them in your payload.
 
 The injector will run as long as the `out` and `err` files are kept open.
 
@@ -82,7 +49,8 @@ lifting of actually injecting code into other processes. Every time the
 injector is used, it generates a session UUID. A piece of bootstrap code
 is injected into the target and has the session UUID passed to it. This
 bootstrap code runs as a new thread and so does not block the target's
-execution.
+execution. That session UUID is passed through to the payload as its first
+argument.
 
 The bootstrap code does the following:
 
