@@ -1,40 +1,30 @@
 CC = clang
-CFLAGS = -g
+CFLAGS = -arch i386 -arch x86_64
 LDFLAGS = -framework AppKit -framework CoreFoundation -framework CoreServices -framework Foundation
 
-SRCS = main.m payload.m mach_inject/mach_inject/mach_inject.c
-OBJS32 = $(addprefix obj/, $(addsuffix .32.o,$(SRCS)))
-OBJS64 = $(addprefix obj/, $(addsuffix .64.o,$(SRCS)))
+SRCS = src/main.m src/payload.m src/mach_inject.c
+OBJS = $(addsuffix .o,$(SRCS))
 
-all: out/all_tests_passed
+all: injector examples
 
-no-tests: out/injector32 out/injector64
+-include $(OBJS:.o=.dep)
 
-out/all_tests_passed: out/injector32 out/injector64
-	@cd tests && ./harness.sh ../out/testresults.txt ../out/all_tests_passed
+src/%.c.o: src/%.c
+	$(CC) -MD -MF $(subst .o,.dep,$@) -c $(CFLAGS) $< -o $@
 
-tests: out/injector32 out/injector64
-	@cd tests && ./harness.sh ../out/testresults.txt ../out/all_tests_passed
+src/%.m.o: src/%.m
+	$(CC) -MD -MF $(subst .o,.dep,$@) -c $(CFLAGS) $< -o $@
 
--include $(OBJS32:.32.o=.32.dep)
--include $(OBJS64:.64.o=.64.dep)
+injector: $(OBJS)
+	$(CC) $(CFLAGS) $(LDFLAGS) $(OBJS) -o $@
 
-obj/%.32.o: %
-	@mkdir -p $(dir $@)
-	$(CC) -MD -MF $(subst .o,.dep,$@) -c -m32 $(CFLAGS) $< -o $@
+examples: examples/helloworld.dylib examples/host
 
-obj/%.64.o: %
-	@mkdir -p $(dir $@)
-	$(CC) -MD -MF $(subst .o,.dep,$@) -c -m64 $(CFLAGS) $< -o $@
+examples/helloworld.dylib: examples/helloworld.c
+	$(CC) $(CFLAGS) -dynamiclib $^ -o $@
 
-out/injector32: $(OBJS32)
-	@mkdir -p $(dir $@)
-	$(CC) -m32 $(LDFLAGS) $(OBJS32) -o $@
-
-out/injector64: $(OBJS64)
-	@mkdir -p $(dir $@)
-	$(CC) -m64 $(LDFLAGS) $(OBJS64) -o $@
+examples/host: examples/host.c
+	$(CC) $(CFLAGS) $^ -o $@
 
 clean:
-	rm -rf obj out
-	@cd tests && ./clean.sh
+	rm -f $(OBJS) $(subst .o,.dep,$(OBJS)) injector examples/helloworld.dylib examples/host

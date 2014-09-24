@@ -31,12 +31,12 @@
 #define RELOCATE(offset, ret, fcn, ...) ret (*fcn ## _impl)(__VA_ARGS__) = \
     (ret (*)(__VA_ARGS__))((char*)fcn + offset)
 
-// private API (fortunately we're not going for the App Store!)
+// expose some pthreads private API (fortunately we're not going for the App Store!)
 extern void __pthread_set_self(char *);
 
 // params used for payloadThreadEntry
 struct ThreadParams {
-    char *sessionUUID;
+    char *args;
     ptrdiff_t codeOffset;
 };
 
@@ -46,10 +46,10 @@ void* payloadThreadEntry(void* param)
     #define BUFSIZE 512
     char confbuf[BUFSIZE], inPath[BUFSIZE], outPath[BUFSIZE], errPath[BUFSIZE], libPath[BUFSIZE], sigPath[BUFSIZE];
     char *base, *expanded;
-    int inFIFO, outFIFO, errFIFO;
+    FILE *in, *out, *err;
     size_t len;
     struct ThreadParams* params = (struct ThreadParams*)param;
-    void (*dylib_entry)(int, int, int);
+    void (*dylib_entry)(int, char **, FILE *, FILE *, FILE *);
     void *dylib_handle;
     NSString *tempDirPath;
     FILE *sigFile;
@@ -72,6 +72,29 @@ void* payloadThreadEntry(void* param)
     RELOCATE(params->codeOffset, FILE *, fopen, const char *, const char *);
     RELOCATE(params->codeOffset, void, fclose, FILE *);
     RELOCATE(params->codeOffset, size_t, confstr, int, char *, size_t);
+    RELOCATE(params->codeOffset, ssize_t, write, int, const void *, size_t);
+    RELOCATE(params->codeOffset, FILE *, fdopen, int, const char *);
+    RELOCATE(params->codeOffset, int, setvbuf, FILE *, char *, int, size_t);
+    RELOCATE(params->codeOffset, void *, calloc, size_t, size_t);
+    RELOCATE(params->codeOffset, void *, realloc, void *, size_t);
+
+    /* pull apart the args buffer into a nice char ** with argc */
+    int argc = 1;
+    int nallocated = 1;
+    char **argv = calloc_impl(sizeof(char *), nallocated + 1);
+    argv[0] = params->args;
+
+    for (char *c = params->args; !(*c == '\0' && *(c + 1) == '\0'); ++c) {
+        if (*c == '\0') {
+            if (argc == nallocated) {
+                nallocated *= 2;
+                argv = realloc_impl(argv, sizeof(char *) * (nallocated + 1));
+                argv[nallocated] = NULL;
+            }
+
+            argv[argc++] = c + 1;
+        }
+    }
 
     if (dlsym_impl(RTLD_DEFAULT, "NSTemporaryDirectory") != NULL) {
         tempDirPath = NSTemporaryDirectory_impl();
@@ -105,7 +128,7 @@ void* payloadThreadEntry(void* param)
     // in fifo
     memset_impl(inPath, 0, BUFSIZE);
     sprintf_impl(inPath, "%s/" PAYLOAD_IN_FIFO_FMT, expanded,
-        params->sessionUUID);
+        params->args);
         
     if (mkfifo_impl(inPath, 0777)) {
         perror_impl("couldn't make in fifo");
@@ -115,7 +138,7 @@ void* payloadThreadEntry(void* param)
     // out fifo
     memset_impl(outPath, 0, BUFSIZE);
     sprintf_impl(outPath, "%s/" PAYLOAD_OUT_FIFO_FMT, expanded,
-        params->sessionUUID);
+        params->args);
         
     if (mkfifo_impl(outPath, 0777)) {
         perror_impl("couldn't make out fifo\n");
@@ -125,7 +148,7 @@ void* payloadThreadEntry(void* param)
     // err fifo
     memset_impl(errPath, 0, BUFSIZE);
     sprintf_impl(errPath, "%s/" PAYLOAD_ERR_FIFO_FMT, expanded,
-        params->sessionUUID);
+        params->args);
         
     if (mkfifo_impl(errPath, 0777)) {
         perror_impl("couldn't make err fifo\n");
@@ -137,7 +160,7 @@ void* payloadThreadEntry(void* param)
     // where the fifos haven't shown up in the FS event stream)
     memset_impl(sigPath, 0, BUFSIZE);
     sprintf_impl(sigPath, "%s/" PAYLOAD_SIGNAL_FMT, expanded,
-        params->sessionUUID);
+        params->args);
         
     sigFile = fopen_impl(sigPath, "w");
     fclose_impl(sigFile);
@@ -146,41 +169,54 @@ void* payloadThreadEntry(void* param)
 
     // we open our fifos after creating them all as the injector will look for
     // the signal file before opening any on its end
-    if ((inFIFO = open_impl(inPath, O_RDONLY)) < 0) {
+    if (!(in = fopen_impl(inPath, "r"))) {
         perror_impl("couldn't open in fifo\n");
         return NULL;
     }
 
-    if ((outFIFO = open_impl(outPath, O_WRONLY)) < 0) {
+    if (!(out = fopen_impl(outPath, "w"))) {
         perror_impl("couldn't open out fifo\n");
         return NULL;
     }
     
-    if ((errFIFO = open_impl(errPath, O_WRONLY)) < 0) {
+    if (!(err = fopen_impl(errPath, "w"))) {
         perror_impl("couldn't open err fifo\n");
         return NULL;
     }
 
+    // line buffer the outputs so they behave like stdout/stderr
+    setvbuf_impl(out, NULL, _IOLBF, 512);
+    setvbuf_impl(err, NULL, _IOLBF, 512);
+
     // Now we can load our payload and run it
     memset_impl(libPath, 0, BUFSIZE);
     sprintf_impl(libPath, "%s/" PAYLOAD_LIB_FMT, expanded,
-        params->sessionUUID);
+        params->args);
 
     dylib_handle = dlopen_impl(libPath, RTLD_NOW);
     if (!dylib_handle) {
         printf_impl("couldn't open payload\n");
+        fclose_impl(in);
+        fclose_impl(out);
+        fclose_impl(err);
         return NULL;
     }
 
-    dylib_entry = (void (*)(int, int, int))
+    dylib_entry = (void (*)(int, char **, FILE *, FILE *, FILE *))
         dlsym_impl(dylib_handle, "payload_entry");
     
     if (!dylib_entry) {
         printf_impl("no entry point\n");
+        fclose_impl(in);
+        fclose_impl(out);
+        fclose_impl(err);
         return NULL;
     }
     
-    dylib_entry(inFIFO, outFIFO, errFIFO);
+    dylib_entry(argc, argv, in, out, err);
+    fclose_impl(in);
+    fclose_impl(out);
+    fclose_impl(err);
     return NULL;
 }
 
@@ -243,9 +279,7 @@ void payloadEntry(ptrdiff_t codeOffset, void *paramBlock,
     sched.sched_priority = sched_get_priority_max_impl(policy);
     pthread_attr_setschedparam_impl(&attr, &sched);
     
-    sessionUUID = (char *)paramBlock;
-    
-    params.sessionUUID = sessionUUID;
+    params.args = (char *)paramBlock;
     params.codeOffset = codeOffset;
     
     pthread_create_impl(&thread, &attr,
