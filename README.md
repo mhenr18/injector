@@ -5,7 +5,7 @@ injector provides a way to inject arbitrary .dylibs into a running process.
 Additionally, it provides the injected code with access to the standard I/O
 associated with the injector, even if the target process is sandboxed.
 
-injector is known to work on OSX 10.9 and has no 3rd-party dependencies.
+injector is known to work on OSX 10.9.
 
 Building
 --------
