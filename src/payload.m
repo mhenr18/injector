@@ -1,5 +1,5 @@
 //
-// payload.m
+// src/payload.m
 // Copyright (c) 2014 Matthew Henry.
 // MIT licensed - refer to LICENSE.txt for details.
 //
@@ -7,9 +7,6 @@
 // executes as a payload in a target binary. To avoid standard library/runtime
 // conflicts, we don't use C++ or (much) ObjC here. For the ObjC we do use, we
 // have to explicitly send messages as objc_msgSend needs relocation!
-//
-// TODO: Test to see if our use of ObjC makes it impossible to inject into
-// binaries that don't link against Foundation.framework
 //
 
 #import <Foundation/Foundation.h>

@@ -1,5 +1,5 @@
 //
-// payload.h
+// src/payload.h
 // Copyright (c) 2014 Matthew Henry.
 // MIT licensed - refer to LICENSE.txt for details.
 //

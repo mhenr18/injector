@@ -1,3 +1,12 @@
+//
+// examples/helloworld.c
+// Copyright (c) 2014 Matthew Henry.
+// MIT licensed - refer to LICENSE.txt for details.
+//
+// An example payload that does nothing but print a "hello world" message
+// and list its argv.
+//
+
 #include <stdio.h>
 
 void payload_entry(int argc, char **argv, FILE *in, FILE *out, FILE *err)

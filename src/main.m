@@ -1,5 +1,5 @@
 //
-// main.m
+// src/main.m
 // Copyright (c) 2014 Matthew Henry.
 // MIT licensed - refer to LICENSE.txt for details.
 //
