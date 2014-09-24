@@ -5,7 +5,7 @@ injector provides a way to inject arbitrary .dylibs into a running process.
 Additionally, it provides the injected code with access to the standard I/O
 associated with the injector, even if the target process is sandboxed.
 
-injector is known to work on OSX 10.9 and has no other dependencies.
+injector is known to work on OSX 10.9 and has no 3rd-party dependencies.
 
 Building
 --------
@@ -39,7 +39,9 @@ This function is called on a new thread upon injection. `in`, `out` and `err`
 are files that correspond to the stdin, stdout and stderr of the injector.
 Don't close them in your payload.
 
-The injector will run as long as the `out` and `err` files are kept open.
+The injector will run as long as the `out` and `err` files are kept open (which
+effectively means until `payload_entry` returns).
+
 
 Implementation
 --------------
